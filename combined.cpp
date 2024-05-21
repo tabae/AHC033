@@ -24,6 +24,14 @@ enum CraneType {
     SMALL,
 };
 
+enum CraneStatus {
+    FREE,
+    PRE_CATCH,
+    CATCH_NOW,
+    PRE_RELEASE,
+    RELEASE_NOW,
+};
+
 enum ActionType {
     CATCH,
     RELEASE,
@@ -53,7 +61,12 @@ struct Crane : Object {
     CraneType crane_type;
     shared_ptr<Container> container;
     bool exist;
-    Crane(int i, int j, int id, CraneType crane_type) : Object(i, j, id, ObjectType::CRANE), crane_type(crane_type), container(nullptr), exist(true) {} 
+    CraneStatus status;
+    int catch_i, catch_j;
+    int release_i, release_j;
+    int prev_container_id;
+    Crane(int i, int j, int id, CraneType crane_type) : Object(i, j, id, ObjectType::CRANE), crane_type(crane_type), container(nullptr), exist(true), prev_container_id(-1) {} 
+    void set_catch_and_release(int, int, int, int);
 };
 
 struct Input {
@@ -92,6 +105,15 @@ void Input::read() {
             cin >> a[i][j];
         }
     }
+}
+
+void Crane::set_catch_and_release(int _catch_i, int _catch_j, int _release_i, int _release_j) {
+    assert(status == CraneStatus::FREE);
+    status = CraneStatus::PRE_CATCH;
+    catch_i = _catch_i;
+    catch_j = _catch_j;
+    release_i = _release_i;
+    release_j = _release_j;
 }
 
 void common::print(const vector<vector<ActionType>>& actions) {
@@ -157,17 +179,34 @@ void Terminal::update2(const vector<ActionType>& actions) {
             cranes[i]->container->j = next_j;
         }
         assert(cranes[i] == next_crane_pos[next_i][next_j]);
+        if(cranes[i]->status == CraneStatus::PRE_CATCH) {
+            if(cranes[i]->i == cranes[i]->catch_i && cranes[i]->j == cranes[i]->catch_j) {
+                cranes[i]->status = CraneStatus::CATCH_NOW;
+            }
+        }
+        else if(cranes[i]->status == CraneStatus::PRE_RELEASE) {
+            if(cranes[i]->i == cranes[i]->release_i && cranes[i]->j == cranes[i]->release_j) {
+                cranes[i]->status = CraneStatus::RELEASE_NOW;
+            }
+        }
         if(actions[i] == ActionType::CATCH) {
             assert(container_pos[cranes[i]->i][cranes[i]->j]);
             assert(!cranes[i]->container);
             cranes[i]->container = move(container_pos[cranes[i]->i][cranes[i]->j]);
+            cranes[i]->prev_container_id = cranes[i]->container->id;
+            cranes[i]->status = CraneStatus::PRE_RELEASE;
         }
         if(actions[i] == ActionType::RELEASE) {
             assert(cranes[i]->container);
+            if(container_pos[cranes[i]->i][cranes[i]->j]) {
+                cerr << cranes[i]->status << endl;
+                cerr << cranes[i]->container->id << ", " << container_pos[cranes[i]->i][cranes[i]->j]->id << endl;
+            }
             assert(!container_pos[cranes[i]->i][cranes[i]->j]);
             container_pos[cranes[i]->i][cranes[i]->j] = move(cranes[i]->container);
             assert(container_pos[cranes[i]->i][cranes[i]->j]->i == cranes[i]->i &&
                    container_pos[cranes[i]->i][cranes[i]->j]->j == cranes[i]->j );
+            cranes[i]->status = CraneStatus::FREE;
         }
         if(actions[i] == ActionType::BOMB) {
             assert(!cranes[i]->container);
@@ -257,17 +296,180 @@ int common::calc_out_i(int id) {
 #ifndef __GREEDY_HPP__
 #define __GREEDY_HPP__
 
+#ifndef __RYUKA_HPP__
+#define __RYUKA_HPP__
+
+#include <random>
+using namespace std;
+
+struct RandGenerator {
+
+    random_device seed_gen;
+    mt19937 engine;
+    mt19937_64 engine64;
+    static const int pshift = 1000000000;
+    
+    RandGenerator() : engine(seed_gen()), engine64(seed_gen()) {}
+    
+    int rand(int mod) {
+        return engine() % mod;
+    }
+    
+    long long randll(long long mod) {
+        return engine64() % mod;
+    } 
+    
+    bool pjudge(double p) {
+        int p_int;
+        if(p > 1) p_int = pshift;
+        else p_int = p * pshift;
+        return rand(pshift) < p_int;
+    }
+
+} ryuka;
+
+#endif
 #include <numeric>
 #include <algorithm>
 #include <set>
 
 extern Input in;
+extern RandGenerator ryuka;
 
-void copy2rec(vector<vector<ActionType>>& res, const vector<ActionType>& actions) {
+struct CR_task {
+    int catch_i, catch_j;
+    int release_i, release_j;
+    bool large_job;
+    CR_task(int catch_i, int catch_j, int release_i, int release_j, bool large_job) : 
+        catch_i(catch_i), catch_j(catch_j), release_i(release_i), release_j(release_j), large_job(large_job) {}
+};
+
+void copy2res(vector<vector<ActionType>>& res, const vector<ActionType>& actions) {
     for(int i = 0; i < n; i++) {
         res[i].push_back(actions[i]);
     }
 }
+
+ActionType get_next_action(int i, const vector<vector<shared_ptr<Crane>>>& next_crane_pos, const Terminal& term, const vector<vector<ActionType>>& res) {
+    shared_ptr<Crane> crane = term.cranes[i];
+    if(!crane->exist) {
+        return ActionType::DESTROYED;
+    }
+    auto random_walk = [&]() -> ActionType {
+        constexpr int di[4] = {1, -1,  0, 0};
+        constexpr int dj[4] = {0,  0, -1, 1};
+        vector<int> k_idx = {0, 1, 2, 3};
+        shuffle(k_idx.begin(), k_idx.end(), ryuka.engine);
+        constexpr ActionType act_types[4] = {ActionType::DOWN, ActionType::UP, ActionType::LEFT, ActionType::RIGHT};
+        for(int k : k_idx) {
+            const int next_i = crane->i + di[k];
+            const int next_j = crane->j + dj[k];
+            if(next_i < 0 || next_j < 0 || next_i >= n || next_j >= n) continue;
+            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                return act_types[k];
+            }
+        }
+        return ActionType::BOMB;
+    };       
+    if(crane->status == CraneStatus::FREE) {
+        assert(!crane->container);
+        /*
+        if(!next_crane_pos[crane->i][crane->j]) {
+            return ActionType::WAIT;
+        }
+        */
+        int container_count = 0;
+        for(int i = 0; i < n; i++) {
+            for(int j = 0; j < n; j++) {
+                if(term.container_pos[i][j]) {
+                    container_count++;
+                }
+            }
+        }
+        int crane_count = 0;
+        for(int i = 0; i < n; i++) {
+            if(term.cranes[i]->exist) {
+                crane_count++;
+            }
+        }
+        if(container_count < crane_count && i != 0) {
+            return ActionType::BOMB;
+        }
+        return random_walk();
+    }
+    else if(crane->status == CraneStatus::PRE_CATCH) {
+        const int di = crane->catch_i - crane->i;
+        const int dj = crane->catch_j - crane->j;
+        if(di != 0) {
+            const int next_i = crane->i + (di > 0 ? 1 : -1);
+            const int next_j = crane->j;
+            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                return (di > 0 ? ActionType::DOWN : ActionType::UP);
+            }
+        }
+        if(dj != 0) {
+            const int next_i = crane->i;
+            const int next_j = crane->j + (dj > 0 ? 1 : -1);
+            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+            }
+        }
+        if(di == 0 && dj == 0) {
+            return ActionType::CATCH;
+        }
+        if(crane->crane_type == CraneType::SMALL) {
+            return random_walk();
+        }
+        return ActionType::WAIT;
+    } 
+    else if(crane->status == CraneStatus::CATCH_NOW) {
+        assert(crane->i == crane->catch_i && crane->j == crane->catch_j);
+        if(!term.container_pos[crane->i][crane->j]) {
+            cerr << crane->i << ", " << crane->j << endl;
+            common::print(res);
+        }
+        assert(term.container_pos[crane->i][crane->j]);
+        assert(!crane->container);
+        return ActionType::CATCH;
+    }
+    else if(crane->status == CraneStatus::PRE_RELEASE) {
+        const int di = crane->release_i - crane->i;
+        const int dj = crane->release_j - crane->j;
+        if(di != 0) {
+            const int next_i = crane->i + (di > 0 ? 1 : -1);
+            const int next_j = crane->j;
+            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                return (di > 0 ? ActionType::DOWN : ActionType::UP);
+            }
+        }
+        if(dj != 0) {
+            const int next_i = crane->i;
+            const int next_j = crane->j + (dj > 0 ? 1 : -1);
+            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+            }
+        }
+        if(di == 0 && dj == 0) {
+            return ActionType::RELEASE;
+        }
+        if(crane->crane_type == CraneType::SMALL) {
+            if(crane->container) {
+                return ActionType::RELEASE;
+            }
+            return random_walk();
+        }
+        return ActionType::WAIT;
+    }
+    else if(crane->status == CraneStatus::RELEASE_NOW) {
+        assert(crane->i == crane->release_i && crane->j == crane->release_j);
+        assert(crane->container);
+        return ActionType::RELEASE;
+    }
+
+    cerr << "get_next_action: failed to find next action" << endl;
+    return ActionType::WAIT;
+}
+
 
 vector<vector<ActionType>> greedy_solve() {
 
@@ -304,26 +506,54 @@ vector<vector<ActionType>> greedy_solve() {
             }
 
             vector<ActionType> actions(n, act);
-            copy2rec(res, actions);
+            copy2res(res, actions);
             term.update2(actions);            
             term.update3();
         }
     }
-    term.watch();
 
+    /*
     {
         term.update1();
         vector<ActionType> actions(n, ActionType::WAIT);
         for(int i = 1; i < n; i++) {
             actions[i] = ActionType::BOMB;
         }
-        copy2rec(res, actions);
+        copy2res(res, actions);
         term.update2(actions);
         term.update3();
     }
-    term.watch();
+    */
+
+    vector<CR_task> cr_tasks;
+
+    auto check_conflict = [&](int i, int j) -> bool {
+        for(const CR_task cr : cr_tasks) {
+            if(cr.catch_i == i && cr.catch_j == j) {
+                return false;
+            }
+            if(cr.release_i == i && cr.release_j == j) {
+                return false;
+            }
+        }
+        for(const shared_ptr<Crane> c : term.cranes) {
+            if(c->status != CraneStatus::FREE && c->exist) {
+                if( c->status == CraneStatus::PRE_CATCH || c->status == CraneStatus::CATCH_NOW) {
+                    if(c->catch_i == i && c->catch_j == j) {
+                        return false;
+                    }
+                }
+                if(c->release_i == i && c->release_j == j) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
 
     while(term.turn_count < MAX_TURN) {
+
+        term.watch();
 
         vector<int> next_c(n, 100);
         set<int> remains;
@@ -342,6 +572,120 @@ vector<vector<ActionType>> greedy_solve() {
             next_c[i] = min(next_c[i], id);
         }
         
+        auto update_cr_tasks = [&]() -> void {
+            for(int i = 0; i < n; i++) {
+                for(int j = 0; j < n-1; j++) {
+                    for(int r = 0; r < n; r++) {
+                        if(check_conflict(i, j) && term.container_pos[i][j] && term.container_pos[i][j]->id == next_c[r]) {
+                            cr_tasks.push_back(CR_task(i, j, term.container_pos[i][j]->out_i, n-1, true));
+                            break;
+                        }   
+                    }
+                }
+            }
+            for(int i = 0; i < n; i++) {
+                for(int j = 0; j < n-1; j++) {
+                    if(check_conflict(i, j) && !term.container_pos[i][j] && !term.crane_pos[i][j]) {
+                        constexpr int di[2] = {1, -1};
+                        constexpr int dj[2] = {0,  0};
+                        for(int k = 0; k < 2; k++) {
+                            const int adj_i = i + di[k];
+                            const int adj_j = j + dj[k];
+                            auto is_closer_than_cur = [&](int out_i, int cur_i, int next_i) -> bool {
+                                const int diff_cur = abs(out_i - cur_i);
+                                const int diff_next = abs(out_i - next_i);
+                                return diff_next < diff_cur;
+                            };
+                            if( adj_i >= 0 && adj_j >= 0 && adj_i < n && adj_j < n &&
+                                term.container_pos[adj_i][adj_j] &&
+                                check_conflict(adj_i, adj_j) &&
+                                is_closer_than_cur(term.container_pos[adj_i][adj_j]->out_i, adj_i, i)) 
+                            {
+                                cr_tasks.push_back(CR_task(adj_i, adj_j, i, j, false));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            for(int i = 0; i < n; i++) {
+                for(int j = 1; j < n-1; j++) {
+                    if(check_conflict(i, j) && !term.crane_pos[i][j] && !term.container_pos[i][j]) {
+                        const int adj_i = i;
+                        const int adj_j = j - 1;
+                        if( adj_i >= 0 && adj_j >= 0 && adj_i < n && adj_j < n &&
+                            term.container_pos[adj_i][adj_j] &&
+                            check_conflict(adj_i, adj_j))
+                        {
+                            cr_tasks.push_back(CR_task(adj_i, adj_j, i, j, false));
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        term.update1();
+        update_cr_tasks();
+        cerr << "cr_tasks.size() = " << cr_tasks.size() << endl;
+        for(auto cr: cr_tasks) {
+            cerr << cr.catch_i << "," << cr.catch_j << "->" << cr.release_i << "," << cr.release_j << endl;
+        }
+        for(int i = 0; i < n; i++) {
+            cerr << "crane #" << i << ": " << term.cranes[i]->status << endl;
+        }
+
+        vector<ActionType> actions(n, ActionType::WAIT);
+        vector<vector<shared_ptr<Crane>>> next_crane_pos(n, vector<shared_ptr<Crane>>(n, nullptr)); 
+
+        for(int i = 0; i < n; i++) {
+            if(!term.cranes[i]->exist) {
+                actions[i] = ActionType::DESTROYED;
+                continue;
+            }
+            if(term.cranes[i]->status == CraneStatus::FREE) {
+                int best_task_id = -1;
+                int min_dist = 100000;
+                for(int t = 0; t < cr_tasks.size(); t++) {
+                    if(!term.container_pos[cr_tasks[t].catch_i][cr_tasks[t].catch_j]) {
+                        continue;
+                    }
+                    if(i != 0 && cr_tasks[t].large_job) {
+                        continue;
+                    }
+                    int dist =  abs(term.cranes[i]->i - cr_tasks[t].catch_i) +
+                                abs(term.cranes[i]->j - cr_tasks[t].catch_j);
+                    if(term.cranes[i]->prev_container_id == term.container_pos[cr_tasks[t].catch_i][cr_tasks[t].catch_j]->id) {
+                        dist += 1000;
+                    }
+                    if(min_dist > dist) {
+                        min_dist = dist;
+                        best_task_id = t;
+                    }
+                }
+                if(best_task_id != -1) {
+                    const CR_task cr = cr_tasks[best_task_id];
+                    cerr << "cr " << i << ":" << cr.catch_i << "," << cr.catch_j << "->" << cr.release_i << "," << cr.release_j << endl;
+                    term.cranes[i]->set_catch_and_release(cr.catch_i, cr.catch_j, cr.release_i, cr.release_j);
+                    cr_tasks.erase(cr_tasks.begin() + best_task_id);
+                }
+            }
+            ActionType act = get_next_action(i, next_crane_pos, term, res);
+            actions[i] = act;
+
+            {
+                auto [di, dj] = common::act2move(actions[i]);
+                const int next_i = term.cranes[i]->i + di;
+                const int next_j = term.cranes[i]->j + dj;
+                next_crane_pos[next_i][next_j] = term.cranes[i]; 
+            }
+        } 
+
+        term.update2(actions);
+        term.update3();
+        copy2res(res, actions);
+
+/*
         int c = -1;
         for(int i = 0; i < n; i++) {
             for(int j = 0; j < n-1; j++) {
@@ -374,7 +718,7 @@ vector<vector<ActionType>> greedy_solve() {
                     actions[0] = act;
                     term.update1();
                     term.update2(actions);
-                    copy2rec(res, actions);
+                    copy2res(res, actions);
                     term.update3();
                 }
                 while(next_j != term.cranes[0]->j) {
@@ -383,7 +727,7 @@ vector<vector<ActionType>> greedy_solve() {
                     actions[0] = act;
                     term.update1();
                     term.update2(actions);
-                    copy2rec(res, actions);
+                    copy2res(res, actions);
                     term.update3();
                 }
             }
@@ -391,14 +735,10 @@ vector<vector<ActionType>> greedy_solve() {
             {
                 vector<ActionType> actions(n, ActionType::DESTROYED);
                 actions[0] = ActionType::CATCH;
-                term.watch();
                 term.update1();
-                term.watch();
                 term.update2(actions);
-                term.watch();
-                copy2rec(res, actions);
+                copy2res(res, actions);
                 term.update3();
-                term.watch();
             }
 
             {
@@ -410,7 +750,7 @@ vector<vector<ActionType>> greedy_solve() {
                     actions[0] = act;
                     term.update1();
                     term.update2(actions);
-                    copy2rec(res, actions);
+                    copy2res(res, actions);
                     term.update3();
                 }
                 while(next_j != term.cranes[0]->j) {
@@ -419,7 +759,7 @@ vector<vector<ActionType>> greedy_solve() {
                     actions[0] = act;
                     term.update1();
                     term.update2(actions);
-                    copy2rec(res, actions);
+                    copy2res(res, actions);
                     term.update3();
                 }
             }
@@ -429,10 +769,9 @@ vector<vector<ActionType>> greedy_solve() {
                 actions[0] = ActionType::RELEASE;
                 term.update1();
                 term.update2(actions);
-                copy2rec(res, actions);
+                copy2res(res, actions);
                 term.update3();
             }
-            term.watch();
         };
 
         const int catch_i = term.containers[c]->i;
@@ -444,8 +783,9 @@ vector<vector<ActionType>> greedy_solve() {
                 && !term.container_pos[catch_i][catch_j]) {
                 catch_and_release(term.container_pos[i][0]->id, catch_i, catch_j);
             }
-        }
-        
+        }      
+*/
+
         cerr << "turn_count = " << term.turn_count << endl;
     }
     return res;

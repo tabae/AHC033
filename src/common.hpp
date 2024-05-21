@@ -24,6 +24,14 @@ enum CraneType {
     SMALL,
 };
 
+enum CraneStatus {
+    FREE,
+    PRE_CATCH,
+    CATCH_NOW,
+    PRE_RELEASE,
+    RELEASE_NOW,
+};
+
 enum ActionType {
     CATCH,
     RELEASE,
@@ -53,7 +61,12 @@ struct Crane : Object {
     CraneType crane_type;
     shared_ptr<Container> container;
     bool exist;
-    Crane(int i, int j, int id, CraneType crane_type) : Object(i, j, id, ObjectType::CRANE), crane_type(crane_type), container(nullptr), exist(true) {} 
+    CraneStatus status;
+    int catch_i, catch_j;
+    int release_i, release_j;
+    int prev_container_id;
+    Crane(int i, int j, int id, CraneType crane_type) : Object(i, j, id, ObjectType::CRANE), crane_type(crane_type), container(nullptr), exist(true), prev_container_id(-1) {} 
+    void set_catch_and_release(int, int, int, int);
 };
 
 struct Input {
@@ -92,6 +105,15 @@ void Input::read() {
             cin >> a[i][j];
         }
     }
+}
+
+void Crane::set_catch_and_release(int _catch_i, int _catch_j, int _release_i, int _release_j) {
+    assert(status == CraneStatus::FREE);
+    status = CraneStatus::PRE_CATCH;
+    catch_i = _catch_i;
+    catch_j = _catch_j;
+    release_i = _release_i;
+    release_j = _release_j;
 }
 
 void common::print(const vector<vector<ActionType>>& actions) {
@@ -160,19 +182,38 @@ void Terminal::update2(const vector<ActionType>& actions) {
             cranes[i]->container->j = next_j;
         }
         assert(cranes[i] == next_crane_pos[next_i][next_j]);
-        // P
+        // PRE_CATCH -> CATCH
+        if(cranes[i]->status == CraneStatus::PRE_CATCH) {
+            if(cranes[i]->i == cranes[i]->catch_i && cranes[i]->j == cranes[i]->catch_j) {
+                cranes[i]->status = CraneStatus::CATCH_NOW;
+            }
+        }
+        // PRE_RELEASE -> RELEASE
+        else if(cranes[i]->status == CraneStatus::PRE_RELEASE) {
+            if(cranes[i]->i == cranes[i]->release_i && cranes[i]->j == cranes[i]->release_j) {
+                cranes[i]->status = CraneStatus::RELEASE_NOW;
+            }
+        }
+        // P, CATCH -> PRE_RELEASE
         if(actions[i] == ActionType::CATCH) {
             assert(container_pos[cranes[i]->i][cranes[i]->j]);
             assert(!cranes[i]->container);
             cranes[i]->container = move(container_pos[cranes[i]->i][cranes[i]->j]);
+            cranes[i]->prev_container_id = cranes[i]->container->id;
+            cranes[i]->status = CraneStatus::PRE_RELEASE;
         }
-        // Q
+        // Q, RELEASE -> FREE
         if(actions[i] == ActionType::RELEASE) {
             assert(cranes[i]->container);
+            if(container_pos[cranes[i]->i][cranes[i]->j]) {
+                cerr << cranes[i]->status << endl;
+                cerr << cranes[i]->container->id << ", " << container_pos[cranes[i]->i][cranes[i]->j]->id << endl;
+            }
             assert(!container_pos[cranes[i]->i][cranes[i]->j]);
             container_pos[cranes[i]->i][cranes[i]->j] = move(cranes[i]->container);
             assert(container_pos[cranes[i]->i][cranes[i]->j]->i == cranes[i]->i &&
                    container_pos[cranes[i]->i][cranes[i]->j]->j == cranes[i]->j );
+            cranes[i]->status = CraneStatus::FREE;
         }
         // B
         if(actions[i] == ActionType::BOMB) {
