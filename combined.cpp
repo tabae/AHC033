@@ -400,18 +400,21 @@ ActionType get_next_action(int i, const vector<vector<shared_ptr<Crane>>>& next_
     else if(crane->status == CraneStatus::PRE_CATCH) {
         const int di = crane->catch_i - crane->i;
         const int dj = crane->catch_j - crane->j;
-        if(di != 0) {
-            const int next_i = crane->i + (di > 0 ? 1 : -1);
-            const int next_j = crane->j;
-            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
-                return (di > 0 ? ActionType::DOWN : ActionType::UP);
+        const int ord = ryuka.rand(2);
+        for(int k = 0; k < 2; k++) {
+            if(di != 0 && k == ord) {
+                const int next_i = crane->i + (di > 0 ? 1 : -1);
+                const int next_j = crane->j;
+                if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                    return (di > 0 ? ActionType::DOWN : ActionType::UP);
+                }
             }
-        }
-        if(dj != 0) {
-            const int next_i = crane->i;
-            const int next_j = crane->j + (dj > 0 ? 1 : -1);
-            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
-                return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+            if(dj != 0 && k != ord) {
+                const int next_i = crane->i;
+                const int next_j = crane->j + (dj > 0 ? 1 : -1);
+                if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                    return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+                }
             }
         }
         if(di == 0 && dj == 0) {
@@ -435,18 +438,21 @@ ActionType get_next_action(int i, const vector<vector<shared_ptr<Crane>>>& next_
     else if(crane->status == CraneStatus::PRE_RELEASE) {
         const int di = crane->release_i - crane->i;
         const int dj = crane->release_j - crane->j;
-        if(di != 0) {
-            const int next_i = crane->i + (di > 0 ? 1 : -1);
-            const int next_j = crane->j;
-            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
-                return (di > 0 ? ActionType::DOWN : ActionType::UP);
+        const int ord = ryuka.rand(2);
+        for(int k = 0; k < 2; k++) {
+            if(di != 0 && k == ord) {
+                const int next_i = crane->i + (di > 0 ? 1 : -1);
+                const int next_j = crane->j;
+                if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                    return (di > 0 ? ActionType::DOWN : ActionType::UP);
+                }
             }
-        }
-        if(dj != 0) {
-            const int next_i = crane->i;
-            const int next_j = crane->j + (dj > 0 ? 1 : -1);
-            if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
-                return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+            if(dj != 0 && k != ord) {
+                const int next_i = crane->i;
+                const int next_j = crane->j + (dj > 0 ? 1 : -1);
+                if(!term.crane_pos[next_i][next_j] && !next_crane_pos[next_i][next_j]) {
+                    return (dj > 0 ? ActionType::RIGHT : ActionType::LEFT);
+                }
             }
         }
         if(di == 0 && dj == 0) {
@@ -526,9 +532,23 @@ vector<vector<ActionType>> greedy_solve() {
     */
 
     vector<CR_task> cr_tasks;
+    auto erase_cr_tasks = [&](int catch_i, int catch_j) -> void {
+        vector<CR_task> new_cr_tasks;
+        for(const CR_task cr: cr_tasks) {
+            if(cr.catch_i == catch_i && cr.catch_j == catch_j) {
+                ;
+            } else {
+                new_cr_tasks.push_back(cr);
+            }
+        }
+        swap(new_cr_tasks, cr_tasks);
+    };
 
-    auto check_conflict = [&](int i, int j) -> bool {
+    auto check_conflict = [&](int i, int j, bool skip_large_job = false) -> bool {
         for(const CR_task cr : cr_tasks) {
+            if(skip_large_job && cr.large_job) {
+                continue;
+            }
             if(cr.catch_i == i && cr.catch_j == j) {
                 return false;
             }
@@ -598,8 +618,8 @@ vector<vector<ActionType>> greedy_solve() {
                             };
                             if( adj_i >= 0 && adj_j >= 0 && adj_i < n && adj_j < n &&
                                 term.container_pos[adj_i][adj_j] &&
-                                check_conflict(adj_i, adj_j) &&
-                                is_closer_than_cur(term.container_pos[adj_i][adj_j]->out_i, adj_i, i)) 
+                                check_conflict(adj_i, adj_j, true) &&
+                                (is_closer_than_cur(term.container_pos[adj_i][adj_j]->out_i, adj_i, i) || !term.container_queue[i].empty())) 
                             {
                                 cr_tasks.push_back(CR_task(adj_i, adj_j, i, j, false));
                                 break;
@@ -615,7 +635,7 @@ vector<vector<ActionType>> greedy_solve() {
                         const int adj_j = j - 1;
                         if( adj_i >= 0 && adj_j >= 0 && adj_i < n && adj_j < n &&
                             term.container_pos[adj_i][adj_j] &&
-                            check_conflict(adj_i, adj_j))
+                            check_conflict(adj_i, adj_j, true))
                         {
                             cr_tasks.push_back(CR_task(adj_i, adj_j, i, j, false));
                             break;
@@ -656,7 +676,11 @@ vector<vector<ActionType>> greedy_solve() {
                     int dist =  abs(term.cranes[i]->i - cr_tasks[t].catch_i) +
                                 abs(term.cranes[i]->j - cr_tasks[t].catch_j);
                     if(term.cranes[i]->prev_container_id == term.container_pos[cr_tasks[t].catch_i][cr_tasks[t].catch_j]->id) {
-                        dist += 1000;
+                        if(term.cranes[i]->crane_type == CraneType::LARGE) {
+                            dist += 1000;
+                        } else {
+                            dist += 1000000;
+                        }
                     }
                     if(min_dist > dist) {
                         min_dist = dist;
@@ -667,7 +691,7 @@ vector<vector<ActionType>> greedy_solve() {
                     const CR_task cr = cr_tasks[best_task_id];
                     cerr << "cr " << i << ":" << cr.catch_i << "," << cr.catch_j << "->" << cr.release_i << "," << cr.release_j << endl;
                     term.cranes[i]->set_catch_and_release(cr.catch_i, cr.catch_j, cr.release_i, cr.release_j);
-                    cr_tasks.erase(cr_tasks.begin() + best_task_id);
+                    erase_cr_tasks(cr.catch_i, cr.catch_j);
                 }
             }
             ActionType act = get_next_action(i, next_crane_pos, term, res);
