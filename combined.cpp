@@ -293,8 +293,205 @@ int common::calc_out_i(int id) {
 }
 
 #endif
-#ifndef __GREEDY_HPP__
-#define __GREEDY_HPP__
+#ifndef __SOLVER_000_HPP__
+#define __SOLVER_000_HPP__
+
+#include <numeric>
+#include <algorithm>
+#include <set>
+
+extern Input in;
+
+
+namespace solver_000 {
+
+void copy2res(vector<vector<ActionType>>& res, const vector<ActionType>& actions) {
+    for(int i = 0; i < n; i++) {
+        res[i].push_back(actions[i]);
+    }
+}
+
+vector<vector<ActionType>> solve() {
+
+    vector<vector<ActionType>> res(n);
+    
+    Terminal term;
+    term.init(in);    
+
+
+    for (int j = 3; j >= 1; j--) {
+        const int m1 = j;
+        const int m2 = m1 + 1;
+        const int m3 = m2 + j;
+        for(int k = 0; k <= m3; k++) {
+            term.update1();
+            
+            ActionType act = ActionType::LEFT;
+            if(k == 0) {
+                act = ActionType::CATCH;
+                for(int i = 0; i < n; i++) {
+                    assert(term.cranes[i]->i == i);
+                    assert(term.cranes[i]->j == 0);
+                }
+            } else if(1 <= k && k <= m1) {
+                act = ActionType::RIGHT;
+            } else if(k == m2) {
+                act = ActionType::RELEASE;
+                for(int i = 0; i < n; i++) {
+                    assert(term.cranes[i]->i == i);
+                    assert(term.cranes[i]->j == j);
+                }
+            } else if(m2+1 <= k && k <= m3) {
+                act = ActionType::LEFT;
+            }
+
+            vector<ActionType> actions(n, act);
+            copy2res(res, actions);
+            term.update2(actions);            
+            term.update3();
+        }
+    }
+
+    {
+        term.update1();
+        vector<ActionType> actions(n, ActionType::WAIT);
+        for(int i = 1; i < n; i++) {
+            actions[i] = ActionType::BOMB;
+        }
+        copy2res(res, actions);
+        term.update2(actions);
+        term.update3();
+    }
+
+    while(term.turn_count < MAX_TURN) {
+
+        vector<int> next_c(n, 100);
+        set<int> remains;
+        for(int i = 0; i < n*n; i++) remains.insert(i);
+        for(int i = 0; i < n; i++) {
+            for(auto p: term.collected_containers[i]) {
+                remains.erase(p->id);
+            }
+        }
+        if(remains.empty()) {
+            cerr << "all containers gone" << endl;
+            break;
+        }
+        for(int id: remains) {
+            int i = common::calc_out_i(id);
+            next_c[i] = min(next_c[i], id);
+        }
+        
+        int c = -1;
+        for(int i = 0; i < n; i++) {
+            for(int j = 0; j < n-1; j++) {
+                for(int k = 0; k < n; k++) {
+                    if(term.container_pos[i][j] && term.container_pos[i][j]->id == next_c[k]) {
+                        c = next_c[k];
+                        break;
+                    }
+                }
+                if(c != -1) break;
+            }
+            if(c != -1) break;
+        }
+
+        if(c == -1) {
+            cerr << "cannot found target container (c=-1)" << endl;
+            break;
+        }
+
+        cerr << "c = " << c << endl;
+
+        auto catch_and_release = [&](int c, int goal_i, int goal_j) -> void {
+
+            {
+                const int next_i = term.containers[c]->i;
+                const int next_j = term.containers[c]->j;
+                while(next_i != term.cranes[0]->i) {
+                    vector<ActionType> actions(n, ActionType::DESTROYED);
+                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
+                    actions[0] = act;
+                    term.update1();
+                    term.update2(actions);
+                    copy2res(res, actions);
+                    term.update3();
+                }
+                while(next_j != term.cranes[0]->j) {
+                    vector<ActionType> actions(n, ActionType::DESTROYED);
+                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
+                    actions[0] = act;
+                    term.update1();
+                    term.update2(actions);
+                    copy2res(res, actions);
+                    term.update3();
+                }
+            }
+
+            {
+                vector<ActionType> actions(n, ActionType::DESTROYED);
+                actions[0] = ActionType::CATCH;
+                term.update1();
+                term.update2(actions);
+                copy2res(res, actions);
+                term.update3();
+            }
+
+            {
+                const int next_i = goal_i;
+                const int next_j = goal_j;
+                while(next_i != term.cranes[0]->i) {
+                    vector<ActionType> actions(n, ActionType::DESTROYED);
+                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
+                    actions[0] = act;
+                    term.update1();
+                    term.update2(actions);
+                    copy2res(res, actions);
+                    term.update3();
+                }
+                while(next_j != term.cranes[0]->j) {
+                    vector<ActionType> actions(n, ActionType::DESTROYED);
+                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
+                    actions[0] = act;
+                    term.update1();
+                    term.update2(actions);
+                    copy2res(res, actions);
+                    term.update3();
+                }
+            }
+
+            {
+                vector<ActionType> actions(n, ActionType::DESTROYED);
+                actions[0] = ActionType::RELEASE;
+                term.update1();
+                term.update2(actions);
+                copy2res(res, actions);
+                term.update3();
+            }
+        };
+
+        const int catch_i = term.containers[c]->i;
+        const int catch_j = term.containers[c]->j;
+        catch_and_release(c, term.containers[c]->out_i, n-1);
+
+        for(int i = 0; i < n; i++) {
+            if(term.container_pos[i][0] && !term.container_queue[i].empty()
+                && !term.container_pos[catch_i][catch_j]) {
+                catch_and_release(term.container_pos[i][0]->id, catch_i, catch_j);
+            }
+        }
+        
+        cerr << "turn_count = " << term.turn_count << endl;
+    }
+    return res;
+
+}
+
+} // namespace solver_000
+
+#endif
+#ifndef __SOLVER_001_HPP__
+#define __SOLVER_001_HPP__
 
 #ifndef __RYUKA_HPP__
 #define __RYUKA_HPP__
@@ -335,6 +532,8 @@ struct RandGenerator {
 
 extern Input in;
 extern RandGenerator ryuka;
+
+namespace sovler_001 {
 
 struct CR_task {
     int catch_i, catch_j;
@@ -477,7 +676,7 @@ ActionType get_next_action(int i, const vector<vector<shared_ptr<Crane>>>& next_
 }
 
 
-vector<vector<ActionType>> greedy_solve() {
+vector<vector<ActionType>> solve() {
 
     vector<vector<ActionType>> res(n);
     
@@ -709,124 +908,57 @@ vector<vector<ActionType>> greedy_solve() {
         term.update3();
         copy2res(res, actions);
 
-/*
-        int c = -1;
-        for(int i = 0; i < n; i++) {
-            for(int j = 0; j < n-1; j++) {
-                for(int k = 0; k < n; k++) {
-                    if(term.container_pos[i][j] && term.container_pos[i][j]->id == next_c[k]) {
-                        c = next_c[k];
-                        break;
-                    }
-                }
-                if(c != -1) break;
-            }
-            if(c != -1) break;
-        }
-
-        if(c == -1) {
-            cerr << "cannot found target container (c=-1)" << endl;
-            break;
-        }
-
-        cerr << "c = " << c << endl;
-
-        auto catch_and_release = [&](int c, int goal_i, int goal_j) -> void {
-
-            {
-                const int next_i = term.containers[c]->i;
-                const int next_j = term.containers[c]->j;
-                while(next_i != term.cranes[0]->i) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-                while(next_j != term.cranes[0]->j) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-            }
-
-            {
-                vector<ActionType> actions(n, ActionType::DESTROYED);
-                actions[0] = ActionType::CATCH;
-                term.update1();
-                term.update2(actions);
-                copy2res(res, actions);
-                term.update3();
-            }
-
-            {
-                const int next_i = goal_i;
-                const int next_j = goal_j;
-                while(next_i != term.cranes[0]->i) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-                while(next_j != term.cranes[0]->j) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-            }
-
-            {
-                vector<ActionType> actions(n, ActionType::DESTROYED);
-                actions[0] = ActionType::RELEASE;
-                term.update1();
-                term.update2(actions);
-                copy2res(res, actions);
-                term.update3();
-            }
-        };
-
-        const int catch_i = term.containers[c]->i;
-        const int catch_j = term.containers[c]->j;
-        catch_and_release(c, term.containers[c]->out_i, n-1);
-
-        for(int i = 0; i < n; i++) {
-            if(term.container_pos[i][0] && !term.container_queue[i].empty()
-                && !term.container_pos[catch_i][catch_j]) {
-                catch_and_release(term.container_pos[i][0]->id, catch_i, catch_j);
-            }
-        }      
-*/
-
-        cerr << "turn_count = " << term.turn_count << endl;
+        cerr << "turn_count (solver_001) = " << term.turn_count << endl;
     }
     return res;
 
 }
+
+}; // namespace solver_001
+
+#endif
+#ifndef __TOKI_HPP__
+#define __TOKI_HPP__
+
+#include <sys/time.h>
+#include <cstddef>
+
+struct Timer {
+
+    double global_start;
+    
+    double gettime() {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        return tv.tv_sec + tv.tv_usec * 1e-6;
+    }
+    
+    void init() {
+        global_start = gettime();
+    }
+    
+    double elapsed() {
+        return gettime() - global_start;
+    }
+} toki;
 
 #endif
 #include <iostream>
 using namespace std;
 
 Input in;
+extern Timer toki;
 
 int main() {
 
+    toki.init();
     in.read();
 
-    vector<vector<ActionType>> ans = greedy_solve();
+    vector<vector<ActionType>> ans = solver_000::solve();
+    vector<vector<ActionType>> ans_001 = sovler_001::solve();
+    if(ans_001.front().size() < ans.front().size()) {
+        ans = ans_001;
+    }
     
     common::print(ans);
 

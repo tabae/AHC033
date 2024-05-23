@@ -1,5 +1,5 @@
-#ifndef __GREEDY_HPP__
-#define __GREEDY_HPP__
+#ifndef __SOLVER_001_HPP__
+#define __SOLVER_001_HPP__
 
 #include "common.hpp"
 #include "ryuka.hpp"
@@ -9,6 +9,8 @@
 
 extern Input in;
 extern RandGenerator ryuka;
+
+namespace sovler_001 {
 
 struct CR_task {
     int catch_i, catch_j;
@@ -160,7 +162,7 @@ ActionType get_next_action(int i, const vector<vector<shared_ptr<Crane>>>& next_
 }
 
 
-vector<vector<ActionType>> greedy_solve() {
+vector<vector<ActionType>> solve() {
 
     vector<vector<ActionType>> res(n);
     
@@ -415,119 +417,12 @@ vector<vector<ActionType>> greedy_solve() {
         term.update3();
         copy2res(res, actions);
 
-/*
-        // まず、移動させるコンテナを決定する
-        int c = -1;
-        for(int i = 0; i < n; i++) {
-            for(int j = 0; j < n-1; j++) {
-                for(int k = 0; k < n; k++) {
-                    if(term.container_pos[i][j] && term.container_pos[i][j]->id == next_c[k]) {
-                        c = next_c[k];
-                        break;
-                    }
-                }
-                if(c != -1) break;
-            }
-            if(c != -1) break;
-        }
-
-        // 順番以外の場合はとりあえず、終了にする
-        if(c == -1) {
-            cerr << "cannot found target container (c=-1)" << endl;
-            break;
-        }
-
-        cerr << "c = " << c << endl;
-
-        auto catch_and_release = [&](int c, int goal_i, int goal_j) -> void {
-
-            // 移動させるコンテナの場所まで移動する。
-            {
-                const int next_i = term.containers[c]->i;
-                const int next_j = term.containers[c]->j;
-                while(next_i != term.cranes[0]->i) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-                while(next_j != term.cranes[0]->j) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-            }
-
-            // つかむ
-            {
-                vector<ActionType> actions(n, ActionType::DESTROYED);
-                actions[0] = ActionType::CATCH;
-                term.update1();
-                term.update2(actions);
-                copy2res(res, actions);
-                term.update3();
-            }
-
-            // 搬出口まで移動する。
-            {
-                const int next_i = goal_i;
-                const int next_j = goal_j;
-                while(next_i != term.cranes[0]->i) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_i > term.cranes[0]->i ? ActionType::DOWN : ActionType::UP);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-                while(next_j != term.cranes[0]->j) {
-                    vector<ActionType> actions(n, ActionType::DESTROYED);
-                    const ActionType act = (next_j > term.cranes[0]->j ? ActionType::RIGHT : ActionType::LEFT);
-                    actions[0] = act;
-                    term.update1();
-                    term.update2(actions);
-                    copy2res(res, actions);
-                    term.update3();
-                }
-            }
-
-            // はなす
-            {
-                vector<ActionType> actions(n, ActionType::DESTROYED);
-                actions[0] = ActionType::RELEASE;
-                term.update1();
-                term.update2(actions);
-                copy2res(res, actions);
-                term.update3();
-            }
-        };
-
-        // step 3
-        const int catch_i = term.containers[c]->i;
-        const int catch_j = term.containers[c]->j;
-        catch_and_release(c, term.containers[c]->out_i, n-1);
-
-        // step 4
-        for(int i = 0; i < n; i++) {
-            if(term.container_pos[i][0] && !term.container_queue[i].empty()
-                && !term.container_pos[catch_i][catch_j]) {
-                catch_and_release(term.container_pos[i][0]->id, catch_i, catch_j);
-            }
-        }      
-*/
-
-        cerr << "turn_count = " << term.turn_count << endl;
+        cerr << "turn_count (solver_001) = " << term.turn_count << endl;
     }
     return res;
 
 }
+
+}; // namespace solver_001
 
 #endif
